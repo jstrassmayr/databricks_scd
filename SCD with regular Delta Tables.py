@@ -43,28 +43,14 @@
 
 # COMMAND ----------
 
-from delta.tables import *
-from pyspark.sql.window import Window
 from pyspark.sql import functions as F
-
-# Show the content of a delta table
-def show_delta_table_content(delta_table : DeltaTable):
-  dfTargetDimEmployee = delta_table.toDF()
-  dfTargetDimEmployee = dfTargetDimEmployee.orderBy(F.asc("id"), F.asc("surrogate_id"))
-  display(dfTargetDimEmployee)
+from pyspark.sql.dataframe import DataFrame
 
 # Add a hash column by using xxhash64 and adding '~' as separator between each column value to avoid collisions.
 # The hash should be built using the actual dimensional attributes (aka. the "flesh") of the table.
 def add_hash_column(df : DataFrame, columns_to_hash : list) -> DataFrame:
   df = df.withColumn("hash", F.lit(F.xxhash64(F.concat_ws("~", *columns_to_hash))))  
   return df
-
-## Add a surrogate key per id and hash row (to make it unique in case of duplicates per (input) id).
-## The surrogate key is called "tmp" as it does not reflect the "current maximum" value of the target table's surrogate key.
-#def add_tmp_surrogate_id_column(df : DataFrame, surrogate_base_keys = ['id', 'hash']) -> DataFrame:
-#  w = Window().orderBy(*surrogate_base_keys)  # ignore the warning regarding performance
-#  df = df.withColumn("tmp_surrogate_id", F.monotonically_increasing_id())
-#  return df 
 
 # COMMAND ----------
 
@@ -74,7 +60,7 @@ def add_hash_column(df : DataFrame, columns_to_hash : list) -> DataFrame:
 # COMMAND ----------
 
 target_dim_employee_tablename = "main.scd_example.dim_employee"
-target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)    # TODO: use spark.read.table(target_dim_employee_tablename) AND remove unused import
+df_target_dim_employee = spark.read.table(target_dim_employee_tablename)
 
 # COMMAND ----------
 
@@ -121,7 +107,6 @@ display(df_updates_raw)
 df_updates = df_updates_raw
 
 df_updates = add_hash_column(df_updates, ['name', 'age'])
-#df_updates = add_tmp_surrogate_id_column(df_updates)
 df_updates = df_updates.withColumn("is_current", F.lit(True))
 display(df_updates)
 
@@ -133,27 +118,17 @@ display(df_updates)
 
 # COMMAND ----------
 
-df_target_dim_employee = target_dim_employee.toDF()
+## A left-anti join returns only rows from the left table that are not matching any rows from the right table.
+## If the hash is different per id, the row is different - compared to the target.
+#df_rows_to_update = (
+#    df_updates.alias("source")
+#    .where("is_current = true")
+#    .join(df_target_dim_employee.alias("target"), ["id", "hash", "is_current"], "leftanti")
+#    .orderBy(F.col("source.id"))
+#)
 
-# TODO
-## Add an if statement that checks if I want to insert a new row if the source row didn't change at all.
-
-# A left-anti join returns only rows from the left table that are not matching any rows from the right table.
-# If the hash is different per id, the row is different - compared to the target.
-df_rows_to_update = (
-    df_updates.alias("source")
-    .where("is_current = true")
-    .join(df_target_dim_employee.alias("target"), ["id", "hash", "is_current"], "leftanti")
-    .orderBy(F.col("source.id"))
-)
-
-## Retrieve the current maximum surrogate key from the target table
-#maxTableKey = df_target_dim_employee.agg({"surrogate_id": "max"}).collect()[0][0] or 0    # or 0 if no rows in target table
-#print(f"Current max. surrogate key is {maxTableKey}")
-
-## Calculate the new surrogate key
-#df_rows_to_update = df_rows_to_update.withColumn("surrogate_id", F.col("tmp_surrogate_id") + maxTableKey)
-#display(df_rows_to_update)
+df_rows_to_update = df_updates
+display(df_rows_to_update)
 
 # COMMAND ----------
 
@@ -164,17 +139,18 @@ df_rows_to_update = (
 # COMMAND ----------
 
 # Merge statement to expire old records
-target_dim_employee.alias("target") \
-  .merge(source = df_rows_to_update.alias("updates"), condition = 'target.id = updates.id') \
-  .whenMatchedUpdate(
-    condition = "target.is_current = True AND target.hash <> updates.hash",   # Invalidate the current row where any value (hash) changed
-    set = {                                      
-      "is_current": F.lit(False),
-      "valid_to": F.lit(F.current_timestamp())
-    }).execute()
+from delta.tables import *
+
+target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)
+target_dim_employee.alias("target").merge(
+    source=df_rows_to_update.alias("updates"), condition="target.id = updates.id"
+).whenMatchedUpdate(
+    condition="target.is_current = True AND target.hash <> updates.hash",  # Invalidate the current row where any value (hash) changed
+    set={"is_current": F.lit(False), "valid_to": F.lit(F.current_timestamp())},
+).execute()
 
 display(df_rows_to_update)
-show_delta_table_content(target_dim_employee)
+display(spark.sql(f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"))
 
 # COMMAND ----------
 
@@ -198,4 +174,4 @@ df_rows_to_insert.write.format("delta").mode("append").saveAsTable(target_dim_em
 
 # COMMAND ----------
 
-show_delta_table_content(target_dim_employee)
+display(spark.sql(f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"))
