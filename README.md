@@ -1,4 +1,4 @@
-# databricks_scd
+# Slowly Changing Dimensions - 2 approaches for Databricks
 
 Contains Slowly Changing Dimension handling in Databricks
 - with regular Delta Tables and
