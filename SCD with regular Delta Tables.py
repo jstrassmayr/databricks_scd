@@ -1,7 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC Don't forget to push this repo to
-# MAGIC https://github.com/jstrassmayr/databricks_scd
+# MAGIC # Process
+# MAGIC This notebook demonstrates how to write changed data from a source table to a target table which supports [Slowly Changing Dimensions](https://www.wikiwand.com/de/articles/Slowly_Changing_Dimensions) Type 2.
+# MAGIC
 # MAGIC
 # MAGIC **Sources**
 # MAGIC - https://docs.databricks.com/en/delta/merge.html#language-python
@@ -18,7 +19,7 @@
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE main.scd_example.dim_employee (
-# MAGIC   surrogate_id LONG NOT NULL,
+# MAGIC   surrogate_id LONG GENERATED ALWAYS AS IDENTITY,
 # MAGIC   id LONG NOT NULL,
 # MAGIC   name STRING NOT NULL,
 # MAGIC   age LONG,
@@ -29,9 +30,9 @@
 # MAGIC )
 # MAGIC USING DELTA;
 # MAGIC
-# MAGIC INSERT INTO main.scd_example.dim_employee (surrogate_id, id, name, age, valid_from, valid_to, is_current, hash) 
-# MAGIC VALUES (6, 22, 'Matt', 6, '2023-01-01', NULL, TRUE, xxhash64('Matt~6')),
-# MAGIC (7, 33, 'John', 10, '2023-01-01', NULL, TRUE, xxhash64('John~10'));
+# MAGIC INSERT INTO main.scd_example.dim_employee (id, name, age, valid_from, valid_to, is_current, hash) 
+# MAGIC VALUES (22, 'Matt', 6, '2023-01-01', NULL, TRUE, xxhash64('Matt~6')),
+# MAGIC (33, 'John', 10, '2023-01-01', NULL, TRUE, xxhash64('John~10'));
 # MAGIC
 # MAGIC SELECT * FROM main.scd_example.dim_employee;
 
@@ -58,22 +59,22 @@ def add_hash_column(df : DataFrame, columns_to_hash : list) -> DataFrame:
   df = df.withColumn("hash", F.lit(F.xxhash64(F.concat_ws("~", *columns_to_hash))))  
   return df
 
-# Add a surrogate key per id and hash row (to make it unique in case of duplicates per (input) id).
-# The surrogate key is called "tmp" as it does not reflect the "current maximum" value of the target table's surrogate key.
-def add_tmp_surrogate_id_column(df : DataFrame, surrogate_base_keys = ['id', 'hash']) -> DataFrame:
-  w = Window().orderBy(*surrogate_base_keys)  # ignore the warning regarding performance
-  df = df.withColumn("tmp_surrogate_id", F.row_number().over(w).cast('long'))
-  return df 
+## Add a surrogate key per id and hash row (to make it unique in case of duplicates per (input) id).
+## The surrogate key is called "tmp" as it does not reflect the "current maximum" value of the target table's surrogate key.
+#def add_tmp_surrogate_id_column(df : DataFrame, surrogate_base_keys = ['id', 'hash']) -> DataFrame:
+#  w = Window().orderBy(*surrogate_base_keys)  # ignore the warning regarding performance
+#  df = df.withColumn("tmp_surrogate_id", F.monotonically_increasing_id())
+#  return df 
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Read target
+# MAGIC # Get reference to target table
 
 # COMMAND ----------
 
 target_dim_employee_tablename = "main.scd_example.dim_employee"
-target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)
+target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)    # TODO: use spark.read.table(target_dim_employee_tablename) AND remove unused import
 
 # COMMAND ----------
 
@@ -120,7 +121,7 @@ display(df_updates_raw)
 df_updates = df_updates_raw
 
 df_updates = add_hash_column(df_updates, ['name', 'age'])
-df_updates = add_tmp_surrogate_id_column(df_updates)
+#df_updates = add_tmp_surrogate_id_column(df_updates)
 df_updates = df_updates.withColumn("is_current", F.lit(True))
 display(df_updates)
 
@@ -134,6 +135,9 @@ display(df_updates)
 
 df_target_dim_employee = target_dim_employee.toDF()
 
+# TODO
+## Add an if statement that checks if I want to insert a new row if the source row didn't change at all.
+
 # A left-anti join returns only rows from the left table that are not matching any rows from the right table.
 # If the hash is different per id, the row is different - compared to the target.
 df_rows_to_update = (
@@ -143,13 +147,13 @@ df_rows_to_update = (
     .orderBy(F.col("source.id"))
 )
 
-# Retrieve the current maximum surrogate key from the target table
-maxTableKey = df_target_dim_employee.agg({"surrogate_id": "max"}).collect()[0][0] or 0    # or 0 if no rows in target table
-print(f"Current max. surrogate key is {maxTableKey}")
+## Retrieve the current maximum surrogate key from the target table
+#maxTableKey = df_target_dim_employee.agg({"surrogate_id": "max"}).collect()[0][0] or 0    # or 0 if no rows in target table
+#print(f"Current max. surrogate key is {maxTableKey}")
 
-# Calculate the new surrogate key
-df_rows_to_update = df_rows_to_update.withColumn("surrogate_id", F.col("tmp_surrogate_id") + maxTableKey)
-display(df_rows_to_update)
+## Calculate the new surrogate key
+#df_rows_to_update = df_rows_to_update.withColumn("surrogate_id", F.col("tmp_surrogate_id") + maxTableKey)
+#display(df_rows_to_update)
 
 # COMMAND ----------
 
@@ -163,7 +167,7 @@ display(df_rows_to_update)
 target_dim_employee.alias("target") \
   .merge(source = df_rows_to_update.alias("updates"), condition = 'target.id = updates.id') \
   .whenMatchedUpdate(
-    condition = "target.is_current = True AND target.hash <> updates.hash",     # Invalidate the current row where any value (hash) changed
+    condition = "target.is_current = True AND target.hash <> updates.hash",   # Invalidate the current row where any value (hash) changed
     set = {                                      
       "is_current": F.lit(False),
       "valid_to": F.lit(F.current_timestamp())
@@ -175,20 +179,17 @@ show_delta_table_content(target_dim_employee)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Alternative: Insert new and updated records outside the previous .merge() statement
+# MAGIC ## Insert new and updated records outside the previous .merge() statement
 
 # COMMAND ----------
 
-df_rows_to_insert = df_rows_to_update\
-       .withColumn("surrogate_id", F.col("surrogate_id").cast("Long"))\
-       .withColumn("valid_from", F.current_date()) \
-       .withColumn("valid_to", F.lit(None).cast("date"))
+df_rows_to_insert = (
+    df_rows_to_update
+    .withColumn("valid_from", F.current_date())
+    .withColumn("valid_to", F.lit(None).cast("date"))
+)
 
-df_rows_to_insert = df_rows_to_insert.select("surrogate_id", "id", "name", "age", "valid_from", "valid_to", "is_current", "hash")
-
-# Write the DataFrame to the Delta table
 df_rows_to_insert.write.format("delta").mode("append").saveAsTable(target_dim_employee_tablename)
-display(df_rows_to_insert)
 
 # COMMAND ----------
 
