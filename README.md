@@ -4,7 +4,7 @@ This repo demos how to handle Slowly Changing Dimension in Databricks
 - with regular Delta Tables and
 - with Delta Live Tables
 
-It contains a Notebook with a step-by-step approach for each technology and a demo Excel file for understanding source and target data.
+It contains a Notebook with a step-by-step approach for each technology and a [demo Excel file](https://github.com/jstrassmayr/databricks_scd/blob/main/SCD%20example%20data.xlsx) for understanding source and target data.
 
 ## Delta Tables and the MERGE INTO command
 
