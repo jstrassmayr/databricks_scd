@@ -12,7 +12,7 @@
 # MAGIC
 # MAGIC **Drawback:** The Merge statement is not able to handle a changed row (=a row that is already in the target table) in one statement. In order do this (UPDATE the existing row to expire it and also inserting a new row containing the changed values) you have to implement the Merge statement followed by an Insert statement (as shown below).
 # MAGIC
-# MAGIC **Sources**
+# MAGIC ## Sources
 # MAGIC - https://docs.databricks.com/en/delta/merge.html#language-python
 # MAGIC - https://iterationinsights.com/article/how-to-implement-slowly-changing-dimensions-scd-type-2-using-delta-table/
 # MAGIC - https://www.youtube.com/watch?v=GhBlup-8JbE
@@ -79,7 +79,6 @@ df_target_dim_employee = spark.read.table(target_dim_employee_tablename)
 
 # COMMAND ----------
 
-import pandas as pd
 from pyspark.sql.types import StructType, StructField, StringType, LongType
 
 schema = StructType([
