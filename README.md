@@ -1,9 +1,10 @@
-# Slowly Changing Dimensions - 2 approaches for Databricks
+# Slowly Changing Dimensions - 2 approaches for Databricks for 2 technologies
 
-Contains Slowly Changing Dimension handling in Databricks
+This repo demos how to handle Slowly Changing Dimension in Databricks
 - with regular Delta Tables and
 - with Delta Live Tables
 
+It contains a Notebook with a step-by-step approach for each technology and a demo Excel file for understanding source and target data.
 
 ## Delta Tables and the MERGE INTO command
 
