@@ -1,4 +1,4 @@
-# Slowly Changing Dimensions - 2 approaches for Databricks for 2 technologies
+# Slowly Changing Dimensions Type 2
 
 This repo demos how to handle Slowly Changing Dimension in Databricks
 - with regular Delta Tables (see [Notebook](https://github.com/jstrassmayr/databricks_scd/blob/main/SCD%20with%20regular%20Delta%20Tables.py)) and
