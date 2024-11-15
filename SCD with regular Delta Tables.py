@@ -3,6 +3,14 @@
 # MAGIC # Process
 # MAGIC This notebook demonstrates how to write changed data from a source table to a target table which supports [Slowly Changing Dimensions](https://www.wikiwand.com/de/articles/Slowly_Changing_Dimensions) Type 2.
 # MAGIC
+# MAGIC 1. Create target table
+# MAGIC 1. Create source (mock) data
+# MAGIC 1. Merge
+# MAGIC     1. Add columns to source data
+# MAGIC     1. Exire old rows in target
+# MAGIC     1. Insert new rows in target
+# MAGIC
+# MAGIC **Drawback:** The Merge statement is not able to handle a changed row (=a row that is already in the target table) in one statement. In order do this (UPDATE the existing row to expire it and also inserting a new row containing the changed values) you have to implement the Merge statement followed by an Insert statement (as shown below).
 # MAGIC
 # MAGIC **Sources**
 # MAGIC - https://docs.databricks.com/en/delta/merge.html#language-python
@@ -133,45 +141,33 @@ display(df_rows_to_update)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Deactivate rows in the target
+# MAGIC ## Expire old rows in the target
 # MAGIC ... if new rows for the ID are coming from the source.
 
 # COMMAND ----------
 
-# Merge statement to expire old records
 from delta.tables import *
 
 target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)
-target_dim_employee.alias("target").merge(
-    source=df_rows_to_update.alias("updates"), condition="target.id = updates.id"
-).whenMatchedUpdate(
-    condition="target.is_current = True AND target.hash <> updates.hash",  # Invalidate the current row where any value (hash) changed
+target_dim_employee.alias("target").merge(source=df_rows_to_update.alias("updates"), condition="target.id = updates.id")
+.whenMatchedUpdate(
+    condition="target.is_current = True AND target.hash <> updates.hash",  # Invalidate only the current row and only if any value (hash) changed
     set={"is_current": F.lit(False), "valid_to": F.lit(F.current_timestamp())},
 ).execute()
 
-display(df_rows_to_update)
 display(spark.sql(f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Insert new and updated records outside the previous .merge() statement
+# MAGIC ## Insert new rows
 
 # COMMAND ----------
 
-df_rows_to_insert = (
-    df_rows_to_update
+df_rows_to_insert = (df_rows_to_update
     .withColumn("valid_from", F.current_date())
     .withColumn("valid_to", F.lit(None).cast("date"))
 )
 
 df_rows_to_insert.write.format("delta").mode("append").saveAsTable(target_dim_employee_tablename)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # Show updated target dimension
-
-# COMMAND ----------
-
 display(spark.sql(f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"))
