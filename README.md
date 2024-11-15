@@ -1,8 +1,8 @@
 # Slowly Changing Dimensions - 2 approaches for Databricks for 2 technologies
 
 This repo demos how to handle Slowly Changing Dimension in Databricks
-- with regular Delta Tables and
-- with Delta Live Tables
+- with regular Delta Tables (see [Notebook](https://github.com/jstrassmayr/databricks_scd/blob/main/SCD%20with%20regular%20Delta%20Tables.py)) and
+- with Delta Live Tables (see [Notebook](https://github.com/jstrassmayr/databricks_scd/blob/main/SCD%20with%20Delta%20Live%20Tables.py))
 
 It contains a Notebook with a step-by-step approach for each technology and a [demo Excel file](https://github.com/jstrassmayr/databricks_scd/blob/main/SCD%20example%20data.xlsx) for understanding source and target data.
 
