@@ -3,3 +3,48 @@
 Contains Slowly Changing Dimension handling in Databricks
 - with regular Delta Tables and
 - with Delta Live Tables
+
+
+## Delta Tables and the MERGE INTO command
+
+You can upsert data from a source table, view, or DataFrame into a target Delta table by using the [MERGE](https://docs.databricks.com/en/delta/merge.html#language-python) operation. 
+Delta Lake supports inserts, updates, and deletes in MERGE, and it supports extended syntax beyond the SQL standards to facilitate advanced use cases.
+
+## Syntax
+```
+MERGE INTO target
+USING source
+ON source.key = target.key
+WHEN MATCHED THEN
+  UPDATE SET *
+WHEN NOT MATCHED THEN
+  INSERT *
+WHEN NOT MATCHED BY SOURCE THEN
+  DELETE
+```
+
+## Delta Live Tables and the APPLY CHANGES command
+
+Delta Live Tables simplifies change data capture (CDC) with the [APPLY CHANGES and APPLY CHANGES FROM SNAPSHOT APIs](https://docs.databricks.com/en/delta-live-tables/cdc.html).
+
+## Syntax
+```
+import dlt
+from pyspark.sql.functions import col, expr
+
+@dlt.view
+def users():
+  return spark.readStream.table("cdc_data.users")
+
+dlt.create_streaming_table("target")
+
+dlt.apply_changes(
+  target = "target",
+  source = "users",
+  keys = ["userId"],
+  sequence_by = col("sequenceNum"),
+  apply_as_deletes = expr("operation = 'DELETE'"),
+  except_column_list = ["operation", "sequenceNum"],
+  stored_as_scd_type = "2"
+)
+```
