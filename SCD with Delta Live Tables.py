@@ -30,12 +30,19 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC The defined view adds a new column `surrogate_id1` to the `dlt_employee` table.
+
+# COMMAND ----------
+
 import dlt
 from pyspark.sql.functions import col, expr
 
 @dlt.view   
 def dlt_employee_streaming():
-  return spark.readStream.format("delta").option("readChangeData", "true").table("main.scd_example.dlt_employee")
+  df = spark.readStream.format("delta").option("readChangeData", "true").table("main.scd_example.dlt_employee")
+  df = df.withColumn("surrogate_id1", F.xxhash64('id', 'sys_edit_dt'))
+  return df
 
 # COMMAND ----------
 
@@ -60,3 +67,19 @@ dlt.apply_changes(
   except_column_list = ["sys_edit_dt", "_change_type", "_commit_version", "_commit_timestamp"],
   stored_as_scd_type = "2"
 )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Add Surrogate Key (alternative) using an extra table
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+from pyspark.sql.dataframe import DataFrame
+
+@dlt.table
+def dlt_dim_employee_with_surrogate_id():
+    df_target_dim_employee = dlt.readStream("dlt_dim_employee")      # Load the data from the existing table
+    df_target_dim_employee = df_target_dim_employee.withColumn("surrogate_id2", F.xxhash64('id', '__START_AT'))
+    return df_target_dim_employee

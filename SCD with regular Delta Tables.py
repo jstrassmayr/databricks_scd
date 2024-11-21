@@ -127,12 +127,12 @@ display(df_updates)
 
 ## A left-anti join returns only rows from the left table that are not matching any rows from the right table.
 ## If the hash is different per id, the row is different - compared to the target.
-#df_rows_to_update = (
-#    df_updates.alias("source")
-#    .where("is_current = true")
-#    .join(df_target_dim_employee.alias("target"), ["id", "hash", "is_current"], "leftanti")
-#    .orderBy(F.col("source.id"))
-#)
+df_rows_to_update = (
+    df_updates.alias("source")
+    .where("is_current = true")
+    .join(df_target_dim_employee.alias("target"), ["id", "hash", "is_current"], "leftanti")
+    .orderBy(F.col("source.id"))
+)
 
 df_rows_to_update = df_updates
 display(df_rows_to_update)
@@ -148,13 +148,18 @@ display(df_rows_to_update)
 from delta.tables import *
 
 target_dim_employee = DeltaTable.forName(spark, target_dim_employee_tablename)
-target_dim_employee.alias("target").merge(source=df_rows_to_update.alias("updates"), condition="target.id = updates.id")
-.whenMatchedUpdate(
+target_dim_employee.alias("target").merge(
+    source=df_rows_to_update.alias("updates"), condition="target.id = updates.id"
+).whenMatchedUpdate(
     condition="target.is_current = True AND target.hash <> updates.hash",  # Invalidate only the current row and only if any value (hash) changed
     set={"is_current": F.lit(False), "valid_to": F.lit(F.current_timestamp())},
 ).execute()
 
-display(spark.sql(f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"))
+display(
+    spark.sql(
+        f"SELECT * FROM {target_dim_employee_tablename} ORDER BY id, surrogate_id"
+    )
+)
 
 # COMMAND ----------
 
